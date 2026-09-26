@@ -569,6 +569,18 @@ export function classifyFusionComplexity(messages: ChatMessage[]): FusionComplex
     return { level: 'very_complex', k: 6, score: 6, reasons };
   }
 
+  // An explanatory request that happens to mention a comparison is still
+  // primarily a teaching/explanation task unless it explicitly asks for a
+  // deeper evaluation, research, or technical reasoning. This prevents phrases
+  // like "explain X, compare it with Y, and discuss the trade-offs" from being
+  // over-scaled to the comparison tier.
+  if (explanationSignal && comparisonSignal && !analysisSignal && !deepRequestSignal && !technicalReasoningSignal) {
+    reasons.push('explanatory request');
+    reasons.push('comparison used as supporting context');
+    if (explicitExampleSignal) reasons.push('example requested');
+    return { level: 'moderate', k: 3, score: 3, reasons };
+  }
+
   if (comparisonSignal) {
     reasons.push('comparison task');
     if (analysisSignal || deepRequestSignal || technicalReasoningSignal) reasons.push('multi-dimensional evaluation');
