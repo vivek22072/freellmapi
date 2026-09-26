@@ -519,11 +519,13 @@ export function classifyFusionComplexity(messages: ChatMessage[]): FusionComplex
   if (researchSignal) { score += 4; reasons.push('research task'); }
   const analysisSignal = /\b(evaluate|evaluation|analy[sz]e|analysis)\b/.test(lower);
   if (analysisSignal) { score += 2; reasons.push('analysis task'); }
-  if (/\b(comprehensive|in[- ]depth|deep dive|thorough|detailed|extensive|step[- ]by[- ]step)\b/.test(lower)) { score += 2; reasons.push('explicit depth requested'); }
+  const deepRequestSignal = /\b(comprehensive|in[- ]depth|deep dive|thorough|detailed|extensive|step[- ]by[- ]step)\b/.test(lower);
+  if (deepRequestSignal) { score += 2; reasons.push('explicit depth requested'); }
   if (/\b(derive|derivation|proof|prove|optimization|optimize|mathematical|equation|theorem)\b/.test(lower)) { score += 2; reasons.push('technical reasoning'); }
   if ((text.match(/\?/g) ?? []).length >= 3) { score += 1; reasons.push('multiple questions'); }
   if (score <= 1) return { level: 'simple', k: 1, score, reasons };
   if (score <= 4) return { level: 'moderate', k: 3, score, reasons };
+  if ((researchSignal && deepRequestSignal) || (codeSignal && deepCodeSignal)) return { level: 'very_complex', k: 6, score, reasons };
   if (score <= 7) return { level: 'complex', k: 4, score, reasons };
   if (score <= 10) return { level: 'very_complex', k: 6, score, reasons };
   return { level: 'very_complex', k: 8, score, reasons };
