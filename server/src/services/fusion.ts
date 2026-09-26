@@ -208,7 +208,7 @@ export function resolveEffectiveConfig(req: FusionConfig): FusionConfig {
   return {
     models,
     k: req.k ?? saved.k,
-    adaptive: req.adaptive ?? saved.adaptive,
+    adaptive: req.adaptive ?? (req.k !== undefined ? false : saved.adaptive),
     judge: req.judge ?? saved.judge ?? undefined,
     strategy: req.strategy ?? saved.strategy,
     expose_panel: req.expose_panel ?? saved.expose_panel,
