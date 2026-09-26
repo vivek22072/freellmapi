@@ -22,6 +22,7 @@ interface SavedFusionConfig {
   models: string[]
   judge: string | null
   k: number
+  adaptive: boolean
   strategy: Strategy
   expose_panel: boolean
 }
@@ -96,6 +97,7 @@ export default function FusionPage() {
     setModels(data.config.models)
     setJudge(data.config.judge ?? JUDGE_AUTO)
     setK(data.config.k)
+    setAdaptive(data.config.adaptive ?? true)
     setStrategy(data.config.strategy)
     setExposePanel(data.config.expose_panel)
   }, [data])
@@ -240,8 +242,22 @@ export default function FusionPage() {
             </section>
           )}
 
-          {/* Auto panel size */}
+          {/* Adaptive panel sizing */}
           {mode === 'auto' && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-sm font-medium">{t('fusion.adaptive')}</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">{t('fusion.adaptiveHelp')}</p>
+                </div>
+                <Switch checked={adaptive} onCheckedChange={setAdaptive} />
+              </div>
+              {adaptive && <p className="text-xs text-muted-foreground rounded-lg border p-3">{t('fusion.adaptiveLevels')}</p>}
+            </section>
+          )}
+
+          {/* Auto panel size */}
+          {mode === 'auto' && !adaptive && (
             <section className="space-y-2">
               <h2 className="text-sm font-medium">{t('fusion.panelSize')}</h2>
               <p className="text-xs text-muted-foreground">{t('fusion.panelSizeHelp', { max: maxK })}</p>
