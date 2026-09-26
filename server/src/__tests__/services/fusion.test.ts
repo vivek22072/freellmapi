@@ -110,3 +110,31 @@ describe('fusion vision judge', () => {
     expect(hasImage).toBe(true);
   });
 });
+
+
+describe('adaptive Fusion complexity', () => {
+  it('maps a simple request to one model', async () => {
+    const { classifyFusionComplexity } = await import('../../services/fusion.js');
+    expect(classifyFusionComplexity([{ role: 'user', content: 'What is 2 + 2?' }])).toMatchObject({ level: 'simple', k: 1 });
+  });
+
+  it('maps a moderate explanatory request to three models', async () => {
+    const { classifyFusionComplexity } = await import('../../services/fusion.js');
+    expect(classifyFusionComplexity([{ role: 'user', content: 'Explain how transformers work, compare them with RNNs, and discuss the main trade-offs.' }])).toMatchObject({ level: 'moderate', k: 3 });
+  });
+
+  it('maps a research-heavy request to a larger panel', async () => {
+    const { classifyFusionComplexity } = await import('../../services/fusion.js');
+    const request = 'Research and analyze the literature, compare benchmarks and evaluation methods, investigate trade-offs, and provide a comprehensive evidence-based analysis with citations.';
+    const decision = classifyFusionComplexity([{ role: 'user', content: request }]);
+    expect(['complex', 'very_complex']).toContain(decision.level);
+    expect(decision.k).toBeGreaterThanOrEqual(4);
+  });
+
+  it('allows adaptive sizing to override saved k in auto mode', async () => {
+    const { selectPanel } = await import('../../services/fusion.js');
+    const config = { k: 8, adaptive: true, judge: null, strategy: 'synthesize' as const, expose_panel: false };
+    const { panel } = selectPanel(config, { estimatedTokens: 100, adaptiveK: 1 });
+    expect(panel.length).toBe(1);
+  });
+});
