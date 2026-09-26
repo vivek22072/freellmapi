@@ -511,7 +511,7 @@ export function classifyFusionComplexity(messages: ChatMessage[]): FusionComplex
   if (messages.filter(m => m.role === 'user').length >= 5) { score += 1; reasons.push('long conversation'); }
   const codeSignal = /\b(code|coding|program|programming|python|typescript|javascript|sql|repository|repo|github|api|sdk|debug|debugging|refactor|implement|implementation|function|class|algorithm)\b/.test(lower) || /```/.test(text);
   const deepCodeSignal = /\b(architecture|architect|system design|build|integrate|integration|debug|refactor|implement|implementation|repo|repository)\b/.test(lower);
-  if (codeSignal) { score += 3; reasons.push('technical/coding task'); }
+  if (/\b(explain|explain how|why does|how does|difference between|walk me through)\b/.test(lower)) { score += 2; reasons.push('explanatory request'); }\n  if (codeSignal) { score += 3; reasons.push('technical/coding task'); }
   if (codeSignal && deepCodeSignal) { score += 2; reasons.push('multi-step engineering task'); }
   const researchSignal = /\b(research|literature|survey|sources?|citations?|evidence|benchmark|benchmarks|compare|comparison|evaluate|evaluation|trade-?offs?|analy[sz]e|analysis|investigate)\b/.test(lower);
   if (researchSignal) { score += 3; reasons.push('research/analysis task'); }
