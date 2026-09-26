@@ -118,17 +118,36 @@ describe('adaptive Fusion complexity', () => {
     expect(classifyFusionComplexity([{ role: 'user', content: 'What is 2 + 2?' }])).toMatchObject({ level: 'simple', k: 1 });
   });
 
+  it('does not treat a technical noun as a coding task', async () => {
+    const { classifyFusionComplexity } = await import('../../services/fusion.js');
+    expect(classifyFusionComplexity([{ role: 'user', content: 'What is Python?' }])).toMatchObject({ level: 'simple', k: 1 });
+  });
+
   it('maps a moderate explanatory request to three models', async () => {
     const { classifyFusionComplexity } = await import('../../services/fusion.js');
     expect(classifyFusionComplexity([{ role: 'user', content: 'Explain how transformers work, compare them with RNNs, and discuss the main trade-offs.' }])).toMatchObject({ level: 'moderate', k: 3 });
   });
 
-  it('maps a research-heavy request to a larger panel', async () => {
+  it('maps an explanation with an example to three models', async () => {
+    const { classifyFusionComplexity } = await import('../../services/fusion.js');
+    expect(classifyFusionComplexity([{ role: 'user', content: 'Explain how transformers work and give an example.' }])).toMatchObject({ level: 'moderate', k: 3 });
+  });
+
+  it('maps a technical comparison to four models', async () => {
+    const { classifyFusionComplexity } = await import('../../services/fusion.js');
+    expect(classifyFusionComplexity([{ role: 'user', content: 'Compare CNNs and Vision Transformers for medical imaging.' }])).toMatchObject({ level: 'complex', k: 4 });
+  });
+
+  it('maps a production multi-stage design request to six models', async () => {
+    const { classifyFusionComplexity } = await import('../../services/fusion.js');
+    const request = 'Design a production multimodal AI system for cancer detection, including architecture, training, evaluation and deployment.';
+    expect(classifyFusionComplexity([{ role: 'user', content: request }])).toMatchObject({ level: 'very_complex', k: 6 });
+  });
+
+  it('maps a broad research request to the widest panel', async () => {
     const { classifyFusionComplexity } = await import('../../services/fusion.js');
     const request = 'Research and analyze the literature, compare benchmarks and evaluation methods, investigate trade-offs, and provide a comprehensive evidence-based analysis with citations.';
-    const decision = classifyFusionComplexity([{ role: 'user', content: request }]);
-    expect(['complex', 'very_complex']).toContain(decision.level);
-    expect(decision.k).toBeGreaterThanOrEqual(4);
+    expect(classifyFusionComplexity([{ role: 'user', content: request }])).toMatchObject({ level: 'very_complex', k: 8 });
   });
 
   it('allows adaptive sizing to override saved k in auto mode', async () => {
