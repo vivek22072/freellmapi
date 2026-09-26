@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { z } from 'zod';
 
 const { mockRunFusion } = vi.hoisted(() => ({ mockRunFusion: vi.fn() }));
 
@@ -6,9 +7,30 @@ const { mockRunFusion } = vi.hoisted(() => ({ mockRunFusion: vi.fn() }));
 // catalog and upstream provider implementations. The assertions below verify
 // that the Responses surface accepts the virtual id and faithfully translates
 // the existing Fusion result in both wire modes.
-vi.mock('../../services/fusion.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../services/fusion.js')>();
-  return { ...actual, runFusion: mockRunFusion };
+vi.mock('../../services/fusion.js', () => {
+  // Keep this route test isolated from Fusion's provider/router graph. Importing
+  // the real module here creates a circular mock through routes/models.ts under
+  // Vitest's hoisted vi.mock semantics.
+  const fusionConfigSchema = z.object({
+    models: z.array(z.string().min(1)).optional(),
+    k: z.number().int().positive().optional(),
+    adaptive: z.boolean().optional(),
+    judge: z.string().min(1).optional(),
+    strategy: z.enum(['synthesize', 'best_of']).optional(),
+    expose_panel: z.boolean().optional(),
+  });
+  class FusionError extends Error {}
+  return {
+    FUSION_MODEL_ID: 'fusion',
+    FusionError,
+    fusionConfigSchema,
+    isFusionModel: (modelId: string | undefined) => {
+      if (!modelId) return false;
+      const lower = modelId.toLowerCase();
+      return lower === 'fusion' || lower.startsWith('fusion:');
+    },
+    runFusion: mockRunFusion,
+  };
 });
 
 import type { Express } from 'express';
