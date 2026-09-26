@@ -504,32 +504,106 @@ export function classifyFusionComplexity(messages: ChatMessage[]): FusionComplex
   const text = messages.map(m => contentToString(m.content ?? '')).join('\n').trim();
   const lower = text.toLowerCase();
   const reasons: string[] = [];
-  let score = 0;
-  if (text.length > 6000) { score += 3; reasons.push('long context'); }
-  else if (text.length > 2000) { score += 2; reasons.push('large context'); }
-  else if (text.length > 700) { score += 1; reasons.push('multi-paragraph request'); }
-  if (messages.filter(m => m.role === 'user').length >= 5) { score += 1; reasons.push('long conversation'); }
-  const codeSignal = /\b(code|coding|program|programming|python|typescript|javascript|sql|repository|repo|github|api|sdk|debug|debugging|refactor|implement|implementation|function|class|algorithm)\b/.test(lower) || /```/.test(text);
-  const deepCodeSignal = /\b(architecture|architect|system design|build|integrate|integration|debug|refactor|implement|implementation|repo|repository)\b/.test(lower);
-  if (/\b(explain|explain how|why does|how does|walk me through)\b/.test(lower)) { score += 1; reasons.push('explanatory request'); }
-  if (codeSignal) { score += 3; reasons.push('technical/coding task'); }
-  if (codeSignal && deepCodeSignal) { score += 2; reasons.push('multi-step engineering task'); }
-  const comparisonSignal = /\b(compare|comparison|difference between|trade-?offs?)\b/.test(lower);
-  if (comparisonSignal) { score += 1; reasons.push('comparison task'); }
+  const userMessages = messages.filter(m => m.role === 'user');
+  const questionCount = (text.match(/\?/g) ?? []).length;
+
+  // Measure task shape instead of treating isolated technical nouns such as
+  // "Python" or "API" as complexity signals. A definition remains simple;
+  // implementation, debugging, comparison, research, and system design scale up.
+  const hasCodeBlock = /\x60\x60\x60/.test(text);
+  const explanationSignal = /\b(explain|why does|how does|walk me through|describe how)\b/.test(lower);
+  const comparisonSignal = /\b(compare|comparison|difference between|trade-?offs?|versus)\b/.test(lower) || /\bvs\.?\b/.test(lower);
   const researchSignal = /\b(research|literature|survey|sources?|citations?|evidence|benchmark|benchmarks|investigate)\b/.test(lower);
-  if (researchSignal) { score += 4; reasons.push('research task'); }
-  const analysisSignal = /\b(evaluate|evaluation|analy[sz]e|analysis)\b/.test(lower);
-  if (analysisSignal) { score += 2; reasons.push('analysis task'); }
-  const deepRequestSignal = /\b(comprehensive|in[- ]depth|deep dive|thorough|detailed|extensive|step[- ]by[- ]step)\b/.test(lower);
-  if (deepRequestSignal) { score += 2; reasons.push('explicit depth requested'); }
-  if (/\b(derive|derivation|proof|prove|optimization|optimize|mathematical|equation|theorem)\b/.test(lower)) { score += 2; reasons.push('technical reasoning'); }
-  if ((text.match(/\?/g) ?? []).length >= 3) { score += 1; reasons.push('multiple questions'); }
-  if (score <= 1) return { level: 'simple', k: 1, score, reasons };
-  if (score <= 4) return { level: 'moderate', k: 3, score, reasons };
-  if ((researchSignal && deepRequestSignal) || (codeSignal && deepCodeSignal)) return { level: 'very_complex', k: 6, score, reasons };
-  if (score <= 7) return { level: 'complex', k: 4, score, reasons };
-  if (score <= 10) return { level: 'very_complex', k: 6, score, reasons };
-  return { level: 'very_complex', k: 8, score, reasons };
+  const analysisSignal = /\b(evaluate|evaluation|analy[sz]e|analysis|assess|assessment)\b/.test(lower);
+  const deepRequestSignal = /\b(comprehensive|in[- ]depth|deep dive|thorough|detailed|extensive|step[- ]by[- ]step|evidence[- ]based)\b/.test(lower);
+  const codingSignal = hasCodeBlock
+    || /\b(code|coding|program|programming|typescript|javascript|sql|repository|repo|github|sdk|debug|debugging|refactor|implement|implementation|function|class|algorithm)\b/.test(lower);
+  const debugSignal = /\b(debug|debugging|refactor|optimi[sz]e|fix (?:this|the|my)|find (?:the )?(?:bug|error))\b/.test(lower);
+  const deepEngineeringSignal = /\b(production|architecture|architect|system design|build|integrate|integration|deploy|deployment|end[- ]to[- ]end|pipeline|scalable|scaling|monitoring|infrastructure)\b/.test(lower);
+  const technicalReasoningSignal = /\b(derive|derivation|proof|prove|optimization|optimize|mathematical|equation|theorem)\b/.test(lower);
+  const multiStageSignal = /\b(design|implement|train|evaluate|test|deploy|monitor|integrate|build)\b/g;
+  const stageCount = new Set((lower.match(multiStageSignal) ?? []).map(s => s.trim())).size;
+  const explicitExampleSignal = /\b(example|examples|sample|demonstrate|illustrate)\b/.test(lower);
+  const simpleDefinitionSignal =
+    /^(what(?:'s| is)|define|meaning of|what does .* mean)\b/.test(lower)
+    && text.length <= 300
+    && !comparisonSignal
+    && !researchSignal
+    && !deepRequestSignal
+    && !codingSignal
+    && !deepEngineeringSignal
+    && !technicalReasoningSignal
+    && questionCount <= 1;
+
+  if (text.length > 6000) reasons.push('long context');
+  else if (text.length > 2000) reasons.push('large context');
+  else if (text.length > 700) reasons.push('multi-paragraph request');
+  if (userMessages.length >= 5) reasons.push('long conversation');
+
+  if (simpleDefinitionSignal) {
+    reasons.push('basic factual/definition request');
+    return { level: 'simple', k: 1, score: 1, reasons };
+  }
+
+  // Research and production/system-design work are the strongest signals.
+  const broadResearch = researchSignal && (
+    deepRequestSignal || analysisSignal || comparisonSignal || questionCount >= 2 || text.length > 2000
+  );
+  const broadEngineering = deepEngineeringSignal && (
+    stageCount >= 2 || codingSignal || deepRequestSignal || text.length > 1200
+  );
+
+  if (broadResearch && (deepRequestSignal || analysisSignal || comparisonSignal || questionCount >= 2)) {
+    reasons.push('deep research task');
+    if (deepRequestSignal || questionCount >= 2 || text.length > 2000) reasons.push('broad research scope');
+    return { level: 'very_complex', k: 8, score: 8, reasons };
+  }
+  if (broadResearch) {
+    reasons.push('research task');
+    return { level: 'very_complex', k: 6, score: 6, reasons };
+  }
+  if (broadEngineering) {
+    reasons.push('multi-stage engineering/design task');
+    if (deepEngineeringSignal) reasons.push('production/system-design scope');
+    if (stageCount >= 2) reasons.push('multiple implementation stages');
+    return { level: 'very_complex', k: 6, score: 6, reasons };
+  }
+
+  if (comparisonSignal) {
+    reasons.push('comparison task');
+    if (analysisSignal || deepRequestSignal || technicalReasoningSignal) reasons.push('multi-dimensional evaluation');
+    return { level: 'complex', k: 4, score: 4, reasons };
+  }
+  if (debugSignal || (technicalReasoningSignal && deepRequestSignal)) {
+    if (debugSignal) reasons.push('debugging/refactoring task');
+    if (technicalReasoningSignal) reasons.push('technical reasoning');
+    return { level: 'complex', k: 4, score: 4, reasons };
+  }
+
+  if (explanationSignal) {
+    reasons.push('explanatory request');
+    if (explicitExampleSignal) reasons.push('example requested');
+    return { level: 'moderate', k: 3, score: 3, reasons };
+  }
+  if (codingSignal) {
+    reasons.push('implementation/coding task');
+    return { level: 'moderate', k: 3, score: 3, reasons };
+  }
+  if (analysisSignal || technicalReasoningSignal || questionCount >= 3 || deepRequestSignal) {
+    if (analysisSignal) reasons.push('analysis task');
+    if (technicalReasoningSignal) reasons.push('technical reasoning');
+    if (questionCount >= 3) reasons.push('multiple questions');
+    if (deepRequestSignal) reasons.push('explicit depth requested');
+    return { level: 'moderate', k: 3, score: 3, reasons };
+  }
+
+  if (text.length > 700 || userMessages.length >= 5) {
+    reasons.push('context-heavy request');
+    return { level: 'moderate', k: 3, score: 3, reasons };
+  }
+
+  reasons.push('straightforward request');
+  return { level: 'simple', k: 1, score: 1, reasons };
 }
 export function selectPanel(config: FusionConfig, requirements: { requireTools?: boolean; requireVision?: boolean; estimatedTokens: number; adaptiveK?: number }): { panel: FusionCandidate[]; overflow: FusionCandidate[]; dropped: string[] } {
   const maxK = panelMaxK();
