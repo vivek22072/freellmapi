@@ -521,7 +521,7 @@ export function classifyFusionComplexity(messages: ChatMessage[]): FusionComplex
   const debugSignal = /\b(debug|debugging|refactor|optimi[sz]e|fix (?:this|the|my)|find (?:the )?(?:bug|error))\b/.test(lower);
   const deepEngineeringSignal = /\b(production|architecture|architect|system design|build|integrate|integration|deploy|deployment|end[- ]to[- ]end|pipeline|scalable|scaling|monitoring|infrastructure)\b/.test(lower);
   const technicalReasoningSignal = /\b(derive|derivation|proof|prove|optimization|optimize|mathematical|equation|theorem)\b/.test(lower);
-  const multiStageSignal = /\b(design|implement|train|evaluate|test|deploy|monitor|integrate|build)\b/g;
+  const multiStageSignal = /\b(design(?:ing)?|implement(?:ation|ing)?|train(?:ing)?|evaluat(?:e|ion|ing)|test(?:ing)?|deploy(?:ment|ing)?|monitor(?:ing)?|integrat(?:e|ion|ing)|build(?:ing)?)\b/g;
   const stageCount = new Set((lower.match(multiStageSignal) ?? []).map(s => s.trim())).size;
   const explicitExampleSignal = /\b(example|examples|sample|demonstrate|illustrate)\b/.test(lower);
   const simpleDefinitionSignal =
