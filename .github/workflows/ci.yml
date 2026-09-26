@@ -1,5 +1,7 @@
 name: CI
 
+# Triggered on push/PR to main; kept explicit for fork validation.
+
 on:
   push:
     branches: [main]
