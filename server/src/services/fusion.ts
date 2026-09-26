@@ -108,6 +108,8 @@ export const fusionConfigSchema = z.object({
   models: z.array(z.string().min(1)).optional(),
   // Auto-panel size when `models` is omitted. Clamped to [1, fusion_max_k].
   k: z.number().int().positive().optional(),
+  // Automatically size the panel from request complexity. When enabled, k is ignored.
+  adaptive: z.boolean().optional(),
   // Judge/synthesizer model id. Omit → the top-ranked available model.
   judge: z.string().min(1).optional(),
   // 'synthesize' (default): one blended answer. 'best_of': skip the judge,
@@ -136,6 +138,7 @@ export const savedFusionConfigSchema = z.object({
   models: z.array(z.string().min(1)).default([]),
   judge: z.string().min(1).nullable().default(null),
   k: z.number().int().positive(),
+  adaptive: z.boolean().default(true),
   strategy: z.enum(['synthesize', 'best_of']),
   expose_panel: z.boolean(),
 });
@@ -143,7 +146,7 @@ export const savedFusionConfigSchema = z.object({
 export type SavedFusionConfig = z.infer<typeof savedFusionConfigSchema>;
 
 function defaultSavedConfig(): SavedFusionConfig {
-  return { mode: 'auto', models: [], judge: null, k: panelDefaultK(), strategy: 'synthesize', expose_panel: false };
+  return { mode: 'auto', models: [], judge: null, k: panelDefaultK(), adaptive: true, strategy: 'synthesize', expose_panel: false };
 }
 
 export function getSavedFusionConfig(): SavedFusionConfig {
@@ -165,6 +168,7 @@ export function setSavedFusionConfig(input: SavedFusionConfig): SavedFusionConfi
     models: [...new Set(input.models)].slice(0, maxK),
     judge: input.judge && input.judge.trim() ? input.judge.trim() : null,
     k: Math.min(Math.max(input.k, 1), maxK),
+    adaptive: input.adaptive,
     strategy: input.strategy,
     expose_panel: input.expose_panel,
   };
@@ -204,6 +208,7 @@ export function resolveEffectiveConfig(req: FusionConfig): FusionConfig {
   return {
     models,
     k: req.k ?? saved.k,
+    adaptive: req.adaptive ?? saved.adaptive,
     judge: req.judge ?? saved.judge ?? undefined,
     strategy: req.strategy ?? saved.strategy,
     expose_panel: req.expose_panel ?? saved.expose_panel,
@@ -490,7 +495,36 @@ export function diversifyChain(ordered: FusionCandidate[]): FusionCandidate[] {
  * both the panel and its refills span genuinely different perspectives before
  * doubling up on either axis.
  */
-export function selectPanel(config: FusionConfig, requirements: { requireTools?: boolean; requireVision?: boolean; estimatedTokens: number }): { panel: FusionCandidate[]; overflow: FusionCandidate[]; dropped: string[] } {
+export type FusionComplexity = 'simple' | 'moderate' | 'complex' | 'very_complex';
+
+export interface FusionComplexityDecision { level: FusionComplexity; k: number; score: number; reasons: string[]; }
+
+/** Deterministic complexity estimation; no extra LLM call or quota is consumed. */
+export function classifyFusionComplexity(messages: ChatMessage[]): FusionComplexityDecision {
+  const text = messages.map(m => contentToString(m.content ?? '')).join('\n').trim();
+  const lower = text.toLowerCase();
+  const reasons: string[] = [];
+  let score = 0;
+  if (text.length > 6000) { score += 3; reasons.push('long context'); }
+  else if (text.length > 2000) { score += 2; reasons.push('large context'); }
+  else if (text.length > 700) { score += 1; reasons.push('multi-paragraph request'); }
+  if (messages.filter(m => m.role === 'user').length >= 5) { score += 1; reasons.push('long conversation'); }
+  const codeSignal = /\b(code|coding|program|programming|python|typescript|javascript|sql|repository|repo|github|api|sdk|debug|debugging|refactor|implement|implementation|function|class|algorithm)\b/.test(lower) || /```/.test(text);
+  const deepCodeSignal = /\b(architecture|architect|system design|build|integrate|integration|debug|refactor|implement|implementation|repo|repository)\b/.test(lower);
+  if (codeSignal) { score += 3; reasons.push('technical/coding task'); }
+  if (codeSignal && deepCodeSignal) { score += 2; reasons.push('multi-step engineering task'); }
+  const researchSignal = /\b(research|literature|survey|sources?|citations?|evidence|benchmark|benchmarks|compare|comparison|evaluate|evaluation|trade-?offs?|analy[sz]e|analysis|investigate)\b/.test(lower);
+  if (researchSignal) { score += 3; reasons.push('research/analysis task'); }
+  if (/\b(comprehensive|in[- ]depth|deep dive|thorough|detailed|extensive|step[- ]by[- ]step)\b/.test(lower)) { score += 1; reasons.push('explicit depth requested'); }
+  if (/\b(derive|derivation|proof|prove|optimization|optimize|mathematical|equation|theorem)\b/.test(lower)) { score += 2; reasons.push('technical reasoning'); }
+  if ((text.match(/\?/g) ?? []).length >= 3) { score += 1; reasons.push('multiple questions'); }
+  if (score <= 1) return { level: 'simple', k: 1, score, reasons };
+  if (score <= 4) return { level: 'moderate', k: 3, score, reasons };
+  if (score <= 7) return { level: 'complex', k: 4, score, reasons };
+  if (score <= 10) return { level: 'very_complex', k: 6, score, reasons };
+  return { level: 'very_complex', k: 8, score, reasons };
+}
+export function selectPanel(config: FusionConfig, requirements: { requireTools?: boolean; requireVision?: boolean; estimatedTokens: number; adaptiveK?: number }): { panel: FusionCandidate[]; overflow: FusionCandidate[]; dropped: string[] } {
   const maxK = panelMaxK();
 
   if (config.models && config.models.length > 0) {
@@ -511,7 +545,8 @@ export function selectPanel(config: FusionConfig, requirements: { requireTools?:
     return { panel, overflow: [], dropped };
   }
 
-  const k = Math.min(Math.max(config.k ?? panelDefaultK(), 1), maxK);
+  const requestedK = config.adaptive ? (requirements.adaptiveK ?? panelDefaultK()) : (config.k ?? panelDefaultK());
+  const k = Math.min(Math.max(requestedK, 1), maxK);
   // Size-aware: the chain excludes models that cannot hold a prompt this large,
   // so a too-small model never claims a slot it is guaranteed to fail.
   const ordered = getOrderedFusionChain(requirements.estimatedTokens)
@@ -606,6 +641,7 @@ export async function runFusion(params: {
   // any) has already-merged precedence field-by-field.
   const config = resolveEffectiveConfig(params.config);
   const strategy = config.strategy ?? 'synthesize';
+  const adaptiveDecision = config.adaptive && !config.models?.length ? classifyFusionComplexity(messages) : null;
 
   const requireTools = (options.tools?.length ?? 0) > 0;
   const requiresToolCall = options.tool_choice === 'required'
@@ -617,7 +653,7 @@ export async function runFusion(params: {
   // structured call. Continue past a prose-only candidate so a later capable
   // model gets a chance; `none` is the explicit opt-out and may stop at prose.
   const acceptsToolCall = options.tool_choice !== 'none';
-  const { panel, overflow, dropped } = selectPanel(config, { requireTools, requireVision: vision, estimatedTokens });
+  const { panel, overflow, dropped } = selectPanel(config, { requireTools, requireVision: vision, estimatedTokens, adaptiveK: adaptiveDecision?.k });
   if (panel.length === 0) {
     const hint = vision
       ? 'No vision-capable model is servable for the panel. Enable a vision model in the Fallback Chain or pass `fusion.models` with vision-capable model ids.'
@@ -876,6 +912,7 @@ export async function runFusion(params: {
     panel: survivors.map(a => ({ platform: a.platform, model: a.modelId })),
     judge: synthesized ? judgeRoute : null,
     synthesized,
+    ...(adaptiveDecision ? { complexity: adaptiveDecision.level, complexity_score: adaptiveDecision.score, panel_size_requested: adaptiveDecision.k } : {}),
   };
 
   if (config.expose_panel) {
@@ -883,6 +920,7 @@ export async function runFusion(params: {
       strategy,
       synthesized,
       judge: judgeModelLabel,
+      ...(adaptiveDecision ? { adaptive: true, complexity: adaptiveDecision.level, complexity_score: adaptiveDecision.score, complexity_reasons: adaptiveDecision.reasons, panel_size_requested: adaptiveDecision.k } : { adaptive: false }),
       panel_requested: panel.map(p => p.modelId),
       dropped,
       panel: answers.map(a => ({
