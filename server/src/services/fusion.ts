@@ -511,11 +511,15 @@ export function classifyFusionComplexity(messages: ChatMessage[]): FusionComplex
   if (messages.filter(m => m.role === 'user').length >= 5) { score += 1; reasons.push('long conversation'); }
   const codeSignal = /\b(code|coding|program|programming|python|typescript|javascript|sql|repository|repo|github|api|sdk|debug|debugging|refactor|implement|implementation|function|class|algorithm)\b/.test(lower) || /```/.test(text);
   const deepCodeSignal = /\b(architecture|architect|system design|build|integrate|integration|debug|refactor|implement|implementation|repo|repository)\b/.test(lower);
-  if (/\b(explain|explain how|why does|how does|difference between|walk me through)\b/.test(lower)) { score += 2; reasons.push('explanatory request'); }\n  if (codeSignal) { score += 3; reasons.push('technical/coding task'); }
+  if (/\b(explain|explain how|why does|how does|walk me through)\b/.test(lower)) { score += 1; reasons.push('explanatory request'); }\n  if (codeSignal) { score += 3; reasons.push('technical/coding task'); }
   if (codeSignal && deepCodeSignal) { score += 2; reasons.push('multi-step engineering task'); }
-  const researchSignal = /\b(research|literature|survey|sources?|citations?|evidence|benchmark|benchmarks|compare|comparison|evaluate|evaluation|trade-?offs?|analy[sz]e|analysis|investigate)\b/.test(lower);
-  if (researchSignal) { score += 3; reasons.push('research/analysis task'); }
-  if (/\b(comprehensive|in[- ]depth|deep dive|thorough|detailed|extensive|step[- ]by[- ]step)\b/.test(lower)) { score += 1; reasons.push('explicit depth requested'); }
+  const comparisonSignal = /\b(compare|comparison|difference between|trade-?offs?)\b/.test(lower);
+  if (comparisonSignal) { score += 1; reasons.push('comparison task'); }
+  const researchSignal = /\b(research|literature|survey|sources?|citations?|evidence|benchmark|benchmarks|investigate)\b/.test(lower);
+  if (researchSignal) { score += 4; reasons.push('research task'); }
+  const analysisSignal = /\b(evaluate|evaluation|analy[sz]e|analysis)\b/.test(lower);
+  if (analysisSignal) { score += 2; reasons.push('analysis task'); }
+  if (/\b(comprehensive|in[- ]depth|deep dive|thorough|detailed|extensive|step[- ]by[- ]step)\b/.test(lower)) { score += 2; reasons.push('explicit depth requested'); }
   if (/\b(derive|derivation|proof|prove|optimization|optimize|mathematical|equation|theorem)\b/.test(lower)) { score += 2; reasons.push('technical reasoning'); }
   if ((text.match(/\?/g) ?? []).length >= 3) { score += 1; reasons.push('multiple questions'); }
   if (score <= 1) return { level: 'simple', k: 1, score, reasons };
