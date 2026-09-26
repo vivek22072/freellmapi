@@ -114,7 +114,7 @@ settingsRouter.put('/unify', (req: Request, res: Response) => {
   res.json({ enabled: isUnifyEnabled(), overrides: getUnifyOverrides() });
 });
 
-// Get the saved fusion default config (panel mode, models, judge, k, strategy).
+// Get the saved fusion default config (panel mode, models, judge, k, adaptive strategy).
 settingsRouter.get('/fusion', (_req: Request, res: Response) => {
   res.json({ config: getSavedFusionConfig(), maxK: getFusionMaxK() });
 });
