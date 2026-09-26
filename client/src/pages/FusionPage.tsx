@@ -77,6 +77,7 @@ export default function FusionPage() {
   const [models, setModels] = useState<string[]>([])
   const [judge, setJudge] = useState<string>(JUDGE_AUTO)
   const [k, setK] = useState<number>(4)
+  const [adaptive, setAdaptive] = useState<boolean>(true)
   const [strategy, setStrategy] = useState<Strategy>('synthesize')
   const [exposePanel, setExposePanel] = useState<boolean>(false)
   const [panelQuery, setPanelQuery] = useState('')
@@ -115,6 +116,7 @@ export default function FusionPage() {
     models,
     judge: judge === JUDGE_AUTO ? null : judge,
     k: Math.min(Math.max(k || 1, 1), maxK),
+    adaptive,
     strategy,
     expose_panel: exposePanel,
   }
